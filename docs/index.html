@@ -19,9 +19,96 @@
 <div id="charts"></div>
 
 <script type="module">
-import {MnistData} from 'https://cdn.jsdelivr.net/gh/cazala/mnist@latest/src/data.js';
+const IMAGE_SIZE = 28 * 28;
+const NUM_CLASSES = 10;
+const NUM_DATASET_ELEMENTS = 6500;
+const NUM_TRAIN_ELEMENTS = 5500;
+const NUM_TEST_ELEMENTS = NUM_DATASET_ELEMENTS - NUM_TRAIN_ELEMENTS;
 
-// Create a simple model
+const MNIST_IMAGES_SPRITE_PATH = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+const MNIST_LABELS_PATH = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+
+class MnistData {
+  constructor() {
+    this.shuffledTrainIndex = 0;
+    this.shuffledTestIndex = 0;
+  }
+
+  async load() {
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const imgRequest = new Promise((resolve) => {
+      img.crossOrigin = '';
+      img.onload = () => {
+        img.width = img.naturalWidth;
+        img.height = img.naturalHeight;
+
+        const datasetBytesBuffer = new ArrayBuffer(NUM_DATASET_ELEMENTS * IMAGE_SIZE);
+        const chunkSize = 5000;
+        canvas.width = img.width;
+        canvas.height = chunkSize;
+
+        for (let i = 0; i < NUM_DATASET_ELEMENTS / chunkSize; i++) {
+          const datasetBytesView = new Uint8Array(datasetBytesBuffer, i * IMAGE_SIZE * chunkSize, IMAGE_SIZE * chunkSize);
+          ctx.drawImage(img, 0, i * chunkSize, img.width, chunkSize, 0, 0, img.width, chunkSize);
+
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let j = 0; j < imageData.data.length / 4; j++) {
+            datasetBytesView[j] = imageData.data[j * 4];
+          }
+        }
+
+        this.datasetImages = new Float32Array(datasetBytesBuffer).map(v => v / 255);
+        resolve();
+      };
+      img.src = MNIST_IMAGES_SPRITE_PATH;
+    });
+
+    const labelsRequest = fetch(MNIST_LABELS_PATH).then(res => res.arrayBuffer()).then(buf => {
+      this.datasetLabels = new Uint8Array(buf);
+    });
+
+    await Promise.all([imgRequest, labelsRequest]);
+
+    this.trainIndices = tf.util.createShuffledIndices(NUM_TRAIN_ELEMENTS);
+    this.testIndices = tf.util.createShuffledIndices(NUM_TEST_ELEMENTS);
+
+    this.trainImages = this.datasetImages.slice(0, IMAGE_SIZE * NUM_TRAIN_ELEMENTS);
+    this.testImages = this.datasetImages.slice(IMAGE_SIZE * NUM_TRAIN_ELEMENTS);
+
+    this.trainLabels = this.datasetLabels.slice(0, NUM_CLASSES * NUM_TRAIN_ELEMENTS);
+    this.testLabels = this.datasetLabels.slice(NUM_CLASSES * NUM_TRAIN_ELEMENTS);
+  }
+
+  nextTrainBatch(batchSize) {
+    return this.nextBatch(batchSize, [this.trainImages, this.trainLabels], this.trainIndices, () => this.shuffledTrainIndex++);
+  }
+
+  nextTestBatch(batchSize) {
+    return this.nextBatch(batchSize, [this.testImages, this.testLabels], this.testIndices, () => this.shuffledTestIndex++);
+  }
+
+  nextBatch(batchSize, data, indices, indexFn) {
+    const batchImagesArray = new Float32Array(batchSize * IMAGE_SIZE);
+    const batchLabelsArray = new Uint8Array(batchSize * NUM_CLASSES);
+
+    for (let i = 0; i < batchSize; i++) {
+      const idx = indices[indexFn()];
+      const image = data[0].slice(idx * IMAGE_SIZE, idx * IMAGE_SIZE + IMAGE_SIZE);
+      const label = data[1].slice(idx * NUM_CLASSES, idx * NUM_CLASSES + NUM_CLASSES);
+      batchImagesArray.set(image, i * IMAGE_SIZE);
+      batchLabelsArray.set(label, i * NUM_CLASSES);
+    }
+
+    const xs = tf.tensor2d(batchImagesArray, [batchSize, IMAGE_SIZE]);
+    const labels = tf.tensor2d(batchLabelsArray, [batchSize, NUM_CLASSES]);
+
+    return { xs, labels };
+  }
+}
+
 function createModel() {
   const model = tf.sequential();
   model.add(tf.layers.dense({inputShape: [784], units: 64, activation: 'relu'}));
@@ -34,7 +121,6 @@ function createModel() {
   return model;
 }
 
-// Main training function
 async function trainModel() {
   const data = new MnistData();
   await data.load();
@@ -56,7 +142,6 @@ async function trainModel() {
   });
 }
 
-// Hook up the button
 document.getElementById('train-btn').addEventListener('click', trainModel);
 </script>
 
