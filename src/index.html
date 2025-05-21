@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MNIST Trainer</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.5.1"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #train-btn { padding: 10px 20px; font-size: 16px; }
+    #charts { margin-top: 30px; }
+  </style>
+</head>
+<body>
+
+<h2>Train a Neural Network on MNIST (Browser)</h2>
+<button id="train-btn">Start Training</button>
+
+<div id="charts"></div>
+
+<script type="module">
+import {MnistData} from 'https://cdn.jsdelivr.net/gh/cazala/mnist@latest/src/data.js';
+
+// Create a simple model
+function createModel() {
+  const model = tf.sequential();
+  model.add(tf.layers.dense({inputShape: [784], units: 64, activation: 'relu'}));
+  model.add(tf.layers.dense({units: 10, activation: 'softmax'}));
+  model.compile({
+    optimizer: 'adam',
+    loss: 'categoricalCrossentropy',
+    metrics: ['loss']
+  });
+  return model;
+}
+
+// Main training function
+async function trainModel() {
+  const data = new MnistData();
+  await data.load();
+
+  const trainData = data.nextTrainBatch(1000);
+  const testData = data.nextTestBatch(200);
+
+  const model = createModel();
+
+  const surface = { name: 'Training Loss', tab: 'Charts' };
+
+  await model.fit(trainData.xs, trainData.labels, {
+    epochs: 10,
+    batchSize: 64,
+    validationData: [testData.xs, testData.labels],
+    callbacks: tfvis.show.fitCallbacks(surface, ['loss'], {
+      callbacks: ['onEpochEnd']
+    })
+  });
+}
+
+// Hook up the button
+document.getElementById('train-btn').addEventListener('click', trainModel);
+</script>
+
+</body>
+</html>
